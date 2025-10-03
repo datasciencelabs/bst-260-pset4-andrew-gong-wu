@@ -109,10 +109,6 @@ population <- population |> row_to_names(row_number = 1) |> # converts first row
   # use case_when to add abbreviations for DC and PR (DONE)
 ```
 
-```{r}
-population
-```
-
 7. As a check, make a barplot of states' 2021 and 2022 populations. Show the state names in the y-axis ordered by population size.  Hint: You will need to use `reorder` and use `facet_wrap`.
 
 ```{r}
@@ -147,47 +143,76 @@ url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions
 regions <- fromJSON(url)
 # right now regions$region gives an ID, regions$region_name gives region name, and regions$states gives a list of states
 
-regions <- map_df(regions$states, ~as.data.frame(t(.x)), .id = "name")
+# want it to look like
+# state_name  region        region_name
+# alabama     id            southeast
+# alaska       other_id     pnw
+
+# map_df first argument: the vector c(1,2,...,length(regions$region)). or 1:k where k is the number of regions
+# map_df second argument: a function that returns a dataframe. note that map_df automatically binds all the outputs row-wise
+# the dataframe has one column for state, which is all the states in region i
+# it has one column for region_id, which is the region ids for those states (all the same)
+# it has one column for region_name, which is the region names for those states
+
+regions <- map_df(1:length(regions$region), function(i) {
+  data.frame(
+    state_name = regions$states[[i]],
+    region = regions$region[[i]],
+    region_name = regions$region_name[i]
+  )
+})
+
+# now changing name of long region
+
+regions <- regions |> mutate(region_name=case_when(
+  region_name == "New York and New Jersey, Puerto Rico, Virgin Islands" ~ "Other",
+  TRUE ~ region_name
+))
 
 # regions <- use jsonlit JSON parser 
 # regions <- convert list to data frame. You can use map_df in purrr package 
 ```
 
-```{r}
-regions
-
-# want it to look like
-```
-
 9. Add a region and region name columns to the `population` data frame.
 
 ```{r}
-# population <- 
+population <- population |> 
+  left_join(regions,by="state_name") # left join because we just want the states that are in population
+# there are extra states in region
 ```
-
 
 10. From reading <https://data.cdc.gov/> we learn the endpoint `https://data.cdc.gov/resource/pwn4-m3yp.json` provides state level data from SARS-COV2 cases. Use the **httr2** tools you have learned to download this into a data frame. Is all the data there? If not, comment on why.
 
-
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-# cases_raw <- 
+resp <- req_perform(request(api)) # request api, then get response
+cases_raw <- resp_body_json(resp,simplifyDataFrame=TRUE) # set simplifyDataFrame=TRUE so we get a dataframe
 ```
 
-We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state.
+We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state. (Weekly data across years.) 
 
 11. The reason you see exactly 1,000 rows is because CDC has a default limit. You can change this limit by adding `$limit=10000000000` to the request. Rewrite the previous request to ensure that you receive all the data. Then wrangle the resulting data frame to produce a data frame with columns `state`, `date` (should be the end date) and `cases`. Make sure the cases are numeric and the dates are in `Date` ISO-8601 format.
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-# cases_raw <- 
-```
+resp <- req_perform(request(paste0(api,"?$limit=10000000000"))) # request api, then get response
+cases_raw <- resp_body_json(resp,simplifyDataFrame=TRUE) # set simplifyDataFrame=TRUE so we get a dataframe
 
+cases <- cases_raw |> select(state,end_date,new_cases) |> # get just the columns we need
+  rename("date" = "end_date") |>
+  rename("cases" = "new_cases") |> # rename columns
+  mutate(cases = as.numeric(cases)) |> # get numeric 
+  mutate(date = as_date(ymd_hms(date))) # use ymd_hms to reduce it to just ymd, then as_date to get away from a datetime
+```
 
 12. For 2020 and 2021, make a time series plot of cases per 100,000 versus time for each state. Stratify the plot by region name. Make sure to label you graph appropriately. 
 
 ```{r}
-#cases |> 
+cases |> 
+  ggplot(aes(x=date,y=cases/100000)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~state)
 ```
 
 13. The dates in the `cases` dataset are stored as character strings. Use the **lubridate** package to properly parse the `date` column, then create a summary table showing the total COVID-19 cases by month and year for 2020 and 2021. The table should have columns for year, month (as month name), and total cases across all states. Order by year and month. Use the **knitr** package and `kable()` function to display the results as a formatted table.
