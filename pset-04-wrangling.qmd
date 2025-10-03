@@ -16,7 +16,9 @@ census_key <- "A_CENSUS_KEY_THAT_WORKS"
 Write a first line of code for your problem set that defines `census_key` by running the code in the file `census-key.R`.
 
 ```{r}
-## Your code here
+# reads and executes the code in the census-key.R file
+# my census-key.R file is in .gitignore, so it doesn't get pushed to GitHub
+source("census-key.R")
 ```
 
 2. The [US Census API User Guide](https://www.census.gov/content/dam/Census/data/developers/api-user-guide/api-user-guide.pdf)
@@ -40,27 +42,34 @@ Hint: Print out `request` to check that the URL matches what we want.
 #| message: false
 #| warning: false
 library(httr2)
-#request <- 
+
+# to create a request with this URL as an endpoint, we need to take the part before "YOURKEYHERE" and paste it together with census_key
+request <- request(paste0("https://api.census.gov/data/2021/pep/population?get=POP_2020,POP_2021,NAME&for=state:*&key=",census_key))
 ```
 
 3. Make a request to the US Census API using the `request` object. Save the response to and object named `response`. Check the response status of your request and make sure it was successful. You can learn about _status codes_ [here](https://en.wikipedia.org/wiki/List_of_HTTP_status_codes).
 
 
 ```{r}
-#response <- 
+# req_perform actually sends the request 
+response <- request |> req_perform()
 ```
 
 4. Use a function from the **httr2** package to determine the content type of your response.
 
 ```{r}
-# Your code here
+# both these functions seem to work
+resp_headers(response)[["Content-Type"]]
+resp_content_type(response)
 ```
 
 5. Use just one line of code and one function to extract the data into a matrix. 
 Hints: 1) Use the `resp_body_json` function. 2) The first row of the matrix will be the variable names and this OK as we will fix in the next exercise.
 
 ```{r}
-#population <- 
+population <- resp_body_json(response,simplifyVector = TRUE)
+
+# note that without simplifyVector we would be dealing with population[[x]][y] instead of population[x,y]
 ```
 
 6. Examine the `population` matrix you just created. Notice that 1) it is not tidy, 2) the column types are not what we want, and 3) the first row is a header. Convert `population` to a tidy dataset. Remove the state ID column and change the name of the column with state names to `state_name`. Add a column with state abbreviations called `state`. Make sure you assign the abbreviations for DC and PR correctly. Hint: Use the **janitor** package to make the first row the header. 
@@ -70,21 +79,48 @@ Hints: 1) Use the `resp_body_json` function. 2) The first row of the matrix will
 #| warning: false
 library(tidyverse)
 library(janitor)
-#population <- population |> ## Use janitor row to names function
-  # convert to tibble
-  # remove stat column
-  # rename state column to state_name
-  # use pivot_longer to tidy
-  # remove POP_ from year
-  # parese all relevant colunns to numeric
-  # add state abbreviations using state.abb variable
-  # use case_when to add abbreviations for DC and PR
+
+population <- population |> row_to_names(row_number = 1) |> # converts first row into headers
+  as.tibble(population) |> # makes the df into a tibble
+  select(POP_2020,POP_2021,NAME) |> # picks just the POP_2020, POP_2021, NAME columns
+  rename("state_name" = "NAME") |>
+  rename("2020" = "POP_2020") |>
+  rename("2021" = "POP_2021") |> # all the necessary renaming
+  pivot_longer(cols=c("2020","2021"), # both 2020 and 2021 have populations in those columns
+               names_to="Year", # that makes the data non-tidy. 
+               values_to="Population") |> # the names of the columns are years; the values of the columns are populations
+  mutate(Year=as.numeric(Year)) |>
+  mutate(Population=as.numeric(Population)) |> # converting year and population into numerics
+  mutate(Abbreviation=state.abb[match(state_name, state.name)]) |> # match(state_name, state.name) returns a vector of ids. first element of state_name is oklahoma; that's the 36th element in state.name, so first element of the match is 36. then state.abb and state.name are in the same order, so it works out
+  mutate(Abbreviation=case_when( # sets Abbreviation to the right of ~ when the condition on the left holds
+    state_name == "District of Columbia" ~ "DC", # when the state name is District of Columbia, set abbreviation to "DC"
+    state_name == "Puerto Rico" ~ "PR",
+    TRUE ~ Abbreviation # TRUE functions like else: when the state name is not District of Columbia or Puerto Rico, set abbreviation to itself 
+  ))
+
+#population <- population |> ## Use janitor row to names function (DONE)
+  # convert to tibble (DONE)
+  # remove state id column (DONE)
+  # rename state column to state_name (DONE)
+  # use pivot_longer to tidy (DONE)
+  # remove POP_ from year (DONE)
+  # parse all relevant columns to numeric (DONE)
+  # add state abbreviations using state.abb variable (DONE)
+  # use case_when to add abbreviations for DC and PR (DONE)
+```
+
+```{r}
+population
 ```
 
 7. As a check, make a barplot of states' 2021 and 2022 populations. Show the state names in the y-axis ordered by population size.  Hint: You will need to use `reorder` and use `facet_wrap`.
 
 ```{r}
-# population |> 
+population |> 
+  mutate(state_name=reorder(state_name,Population)) |>
+  ggplot(aes(x=Population,y=state_name)) +
+  geom_col() + 
+  facet_wrap(~Year)
   # reorder state
   # assign aesthetic mapping
   # use geom_col to plot barplot
@@ -107,8 +143,20 @@ points to a JSON file that lists the states in the 10 Public Health Service (PHS
 library(jsonlite)
 library(purrr)
 url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions.json"
+
+regions <- fromJSON(url)
+# right now regions$region gives an ID, regions$region_name gives region name, and regions$states gives a list of states
+
+regions <- map_df(regions$states, ~as.data.frame(t(.x)), .id = "name")
+
 # regions <- use jsonlit JSON parser 
 # regions <- convert list to data frame. You can use map_df in purrr package 
+```
+
+```{r}
+regions
+
+# want it to look like
 ```
 
 9. Add a region and region name columns to the `population` data frame.
