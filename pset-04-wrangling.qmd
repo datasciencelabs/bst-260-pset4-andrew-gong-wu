@@ -208,17 +208,54 @@ cases <- cases_raw |> select(state,end_date,new_cases) |> # get just the columns
 12. For 2020 and 2021, make a time series plot of cases per 100,000 versus time for each state. Stratify the plot by region name. Make sure to label you graph appropriately. 
 
 ```{r}
-cases |> 
-  ggplot(aes(x=date,y=cases/100000)) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~state)
+# first, we need the cases df to have a column for region
+# as such, we'll update the regions df to have a column for abbreviation of state
+# then we'll join the cases df to the new_regions df
+# then we'll join the cases df to the population df to get populations
+# afterwards, we can stratify by region name
+
+new_region <- regions |>
+  mutate(state = state.abb[match(state_name,state.name)]) |>
+  mutate(state = case_when(
+    state_name == "Puerto Rico" ~ "PR",
+    state_name == "District of Columbia" ~ "DC",
+    TRUE ~ state
+  ))
+```
+
+
+```{r}
+# now we can left join cases with new_region
+# renaming column for sanity reasons; adding year column
+cases |> left_join(new_region,by="state") |> # get region column
+  rename(Abbreviation = "state") |> # rename column for sanity reasons
+  mutate(Year=year(date)) |> # add a column for year
+  filter(!is.na(region_name)) |> # get rid of NA regions
+  filter(date < make_date(2022,1,1)) |> # get rid of dates after 2022
+  left_join(population |> select(state_name,Year,Population), by = c("state_name" = "state_name", "Year" = "Year")) |> # get population information so we can do cases per 100000 people
+  ggplot(aes(x=date,y=cases*100000/Population)) + # plotting date against cases per 100000 people
+  geom_line(aes(col=state_name)) + # need different states to have their own lines
+  facet_wrap(~region_name) + # stratifying by region name
+  xlab("Date") + # labeling 
+  ylab("Cases per 100000") + 
+  ggtitle("Cases per 100000 vs. Time") 
 ```
 
 13. The dates in the `cases` dataset are stored as character strings. Use the **lubridate** package to properly parse the `date` column, then create a summary table showing the total COVID-19 cases by month and year for 2020 and 2021. The table should have columns for year, month (as month name), and total cases across all states. Order by year and month. Use the **knitr** package and `kable()` function to display the results as a formatted table.
 
 ```{r}
-#cases |> 
+library(knitr)
+```
+
+```{r}
+# note that we already parsed the date column back in problem 11; it seems unnecessary to parse them again
+cases |> filter(date < make_date(2022,1,1)) |> # get rid of dates 2022 and on
+  mutate(Year = year(date)) |>
+  mutate(Month = month(date,label=TRUE)) |>
+  group_by(Year, Month) |>
+  summarize(TotalCases = sum(cases),
+            .groups="drop") |>
+  kable(caption="COVID-19 cases by month and year for 2020 and 2021")
 ```
 
 14. The following URL provides additional COVID-19 data from the CDC in JSON format:
@@ -231,11 +268,40 @@ Use **httr2** to download COVID-19 death data from this endpoint. Make sure to r
 
 
 ```{r}
-# Your code here
+resp_p14 <- req_perform(request(paste0(deaths_url,"?$limit=10000000000")))
+deaths_raw <- resp_body_json(resp_p14,simplifyVector=TRUE)
+```
+
+```{r}
+# covid_19_deaths
+# end_date
+deaths <- deaths_raw |> 
+  select(state,end_date,covid_19_deaths) |> # getting the right columns
+  rename(date = end_date) |>
+  rename(deaths = covid_19_deaths) |> # renaming
+  mutate(date = as_date(ymd_hms(date))) |> # fixing dates into right format
+  mutate(deaths = as.numeric(deaths)) # fixing deaths column to be numeric
 ```
 
 15. Using the `deaths` dataset you created, make a bar plot showing the total COVID-19 deaths by state. Show only the top 10 states with the highest death counts. Order the bars from highest to lowest and use appropriate labels and title.
 
 ```{r}
-# Your code here
+deaths |> filter(state != "United States") |> # get rid of states that are just everything
+  filter(!is.na(deaths)) |>
+  group_by(state) |>
+  summarize(total_deaths = sum(deaths), # get total deaths per state
+            .groups = "drop") |>
+  arrange(desc(total_deaths)) |> # arrange by order so we can take the top 10
+  slice_head(n=10) |>
+  ggplot(aes(x=reorder(state,-total_deaths),y=total_deaths)) + # x needs to be a reordering of the states, otherwise it sets to alphabetical
+  geom_col() + 
+  xlab("State") +
+  ylab("Total Deaths") +
+  ggtitle("Top 10 States in Total Death from COVID-19")
 ```
+
+
+
+
+
+
